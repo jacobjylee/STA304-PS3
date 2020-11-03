@@ -1,0 +1,225 @@
+---
+title: "Trump VS Biden"
+author: "Ju Yoon Lee"
+date: "Due Date: November 2, 2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+```{r setup, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+#install.packages("")
+library(tidyverse)
+library(haven)
+library(dplyr)
+library(lme4)
+library(ggplot2)
+library(tidyr)
+library(broom)
+library(ggpubr)
+library(knitr)
+
+#setwd("/Users/jacoblee/Desktop/PS3")
+
+# Loading in the cleaned survey Data
+survey_data <- read_csv("survey_data.csv")
+
+# Loading in the cleaned census Data
+census_data <- read_csv("census_data.csv")
+
+```
+
+# Model
+
+Here we are interested in predicting the popular vote outcome of the 2020 American federal election (include citation). To do this we are employing a post-stratification technique. In the following sub-sections I will describe the model specifics and the post-stratification calculation.
+
+
+## Model Specifics
+I will be using a logistic regression model with categorical variables to model the proportion of voters who will vote for Donald Trump. I will be using age, gender, race, education, and income as my explanatory variables. These variables, with the exception of age, are categorical with 2 categories, 0 and 1.  \
+
+$\bullet$ Gender is classified as 1 if observation is male, 0 otherwise; \
+
+$\bullet$ race is classified as 1 if observation is white, 0 otherwise; \
+
+$\bullet$ education is classified as 1 if the participant has completed at least a bachelors degree, 0 otherwise; \
+
+$\bullet$ income is classified as 1 if the participant has an average income or higher, 0 otherwise.\
+
+The general logistic regression model I am using is
+
+$$ y = \beta_0 + \beta_1x_{Age} + \beta_2x_{Gender} +\beta_3x_{Race} +\beta_4x_{Education} +\beta_5x_{Income} +\epsilon$$
+
+Where $y$ represents the proportion of voters who will vote for Donald Trump. Similarly, $\beta_0$ represents the intercept of the model, the proportion of 0 year old female, non-white voters with less than average income and has not completed at least a bachelors degree who will vote for Donald Trump (This is actually not possible since age will always be greater than or equal to 18). Additionally, $\beta_i$ represents the slopes of the model. So, for each categorical explanatory variable, $\beta_i$ is the slope for the variable and notice that if $x_{Gender},x_{Race},x_{Education},x_{Income}$ are all equal to zero, then their slopes are irrelevant and the model depends only on age. \
+
+The survey data and census data originally had multiple categories for each variable but has been reduced to 2 for the sake of simplifying the model based on the proportions of the two categories. All observations where the age of the participant is younger than the legal age to vote has been removed from the data and age is the only explanatory variable which is numeric and continuous. This reduces the data to only observations that are relevant and separates the data into very broad categories. \
+
+Based on the summary of the model, the slope estimate for age is 0.011720 and we can predict that age will not have any big impacts on the outcome.
+
+```{r, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+# Creating the Model
+Age <- survey_data$age
+Gender <- survey_data$male
+Race <- survey_data$white
+Inc_gr <- survey_data$above_avg
+Education_Lvl <- survey_data$bdorhigher
+Support_Trump <- survey_data$vote_trump
+
+model <- glmer(Support_Trump ~ Age +
+               (1|Gender) +
+               (1|Race) +
+               (1|Inc_gr) +
+               (1|Education_Lvl),
+             data=survey_data, family= "binomial")
+
+#print(summary(model1))
+```
+
+## Post-Stratification 
+
+In order to estimate the proportion of voters who will vote for Donald Trump I need to perform a post-stratification analysis. Here I create cells based off different ages, race, income, education, and gender. I decided to split the cells based on age, race, income, education, and gender because differences between these factors seem to have a greater impact on the outcome of proportion of voters who will vote for Trump compared to, for example, marital status. Using the model described in the previous sub-section I will estimate the proportion of voters in each bin. I will then weight each proportion estimate (within each bin) by the respective population size of that bin and sum those values and divide that by the entire population size. This process predicts the outcome of the popularity vote between Trump and Biden.
+
+```{r, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+# Here I will perform the post-stratification calculation
+census_data$logodds_estimate <-
+  model %>%
+  predict(newdata = census_data)
+
+census_data$estimate <-
+  exp(census_data$logodds_estimate)/(1+exp(census_data$logodds_estimate))
+
+census_data1 <- census_data %>%
+  count(age, white, male, above_avg,bdorhigher) %>%
+  group_by(age, white, male, above_avg,bdorhigher)
+
+census_data3 <- merge(census_data, census_data1)
+
+outcome_predict <- census_data3 %>%
+  mutate(vote_predict_prop = estimate*n) %>%
+  summarise(vote_predict = sum(vote_predict_prop)/sum(n))
+
+#print(outcome_predict)
+```
+
+# Results
+
+First, we will look at the proportion of voters who will vote for Trump for each category. Below is the corresponding bar graphs where the different colours represent the different categories for each explanatory variable. \
+
+```{r, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+y_trump <- survey_data[!(survey_data$vote_trump=="0"),] 
+  
+dxy1 <- survey_data[!(survey_data$above_avg=="0"),] # 777
+dxy2 <- survey_data[!(survey_data$above_avg=="1"),] # 1145
+dxy3 <- y_trump[!(y_trump$above_avg=="0"),] # 222
+dxy4 <- y_trump[!(y_trump$above_avg=="1"),] # 457
+# 222/777 = 0.2857 and 457/1145 = 0.3991
+X1 <- c("Above Average", "Below Average")
+Y1 <- c(0.3991, 0.2857)
+a <- ggplot() +
+  geom_col(aes(x=X1,y=Y1, fill=X1)) +
+  ylab("Proportion") +
+  xlab("") +
+  theme(legend.position="none") +
+  ylim(0,1) +
+  coord_flip()
+
+
+dyy1 <- survey_data[!(survey_data$male=="0"),] # 904
+dyy2 <- survey_data[!(survey_data$male=="1"),] # 1018
+dyy3 <- y_trump[!(y_trump$male=="0"),] # 392
+dyy4 <- y_trump[!(y_trump$male=="1"),] # 398
+# 392/904 = 0.4336 and 398/1018 = 0.3910
+X2 <- c("Male", "Female")
+Y2 <- c(0.4336, 0.3910)
+b <- ggplot() +
+  geom_col(aes(x=X2,y=Y2, fill = X2)) +
+  ylab("Proportion") +
+  xlab("") +
+  theme(legend.position="none") +
+  ylim(0,1) +
+  coord_flip()
+
+
+dyx1 <- survey_data[!(survey_data$bdorhigher=="0"),] # 956
+dyx2 <- survey_data[!(survey_data$bdorhigher=="1"),] # 966
+dyx3 <- y_trump[!(y_trump$bdorhigher=="0"),] # 380
+dyx4 <- y_trump[!(y_trump$bdorhigher=="1"),] # 410
+X3 <- c("Less than College", "At least College")
+Y3 <- c(0.4244, 0.3975)
+c <- ggplot() +
+  geom_col(aes(x=X3,y=Y3, fill=X3)) +
+  ylab("Proportion") +
+  xlab("") +
+  theme(legend.position="none") +
+  ylim(0,1) +
+  coord_flip()
+
+
+dxz1 <- survey_data[!(survey_data$white=="0"),] # n1222
+dxz2 <- survey_data[!(survey_data$white=="1"),] # 700
+dxz3 <- y_trump[!(y_trump$white=="0"),] # 582
+dxz4 <- y_trump[!(y_trump$white=="1"),] # 208
+X4 <- c("Not White", "White")
+Y4 <- c(0.2971, 0.4763)
+d <- ggplot() +
+  geom_col(aes(x=X4, y=Y4, fill=X4)) +
+  ylab("Proportion") +
+  xlab("") +
+  theme(legend.position="none") +
+  ylim(0,1) +
+  coord_flip()
+
+plots <- ggarrange(a, b, c, d, labels=c("A","B","C","D"), ncol=1, nrow=4)
+annotate_figure(plots,
+                top = text_grob("Support for Trump", color = "black", face = "bold", size = 16))
+```
+\
+
+Based on the graphs, it seems that the race observes the biggest difference in proportion of voters who will vote for Trump, with the proportion of white voters supporting Trump is significantly greater than the proportion of non-white voters supporting Trump. This is something we can expect, considering that Trump has been accused of being a racist and a white supremacist. Notice that none of these values for proportion exceed 0.50 which means that a greater proportion of voters will vote for Biden. For example, the proportion of white voters who will vote for Trump is roughly 0.48 which means that roughly 0.52 of white voters will vote for Biden. Similarly, for each category, it looks as if a higher proportion of all voters will vote for Biden. Thus, we have no objections so far that Biden will win the popularity vote with a higher proportion of votes.
+
+Our prediction of the proportion of voters who will vote for Trump based on model created using the survey and census data has an output of 0.4182. In other words, we predict that 41.82% of all voters will vote for Trump and as a result, Biden will win the popularity vote. This is consistent with our expectation of the outcome, which was that Biden will win the popularity vote. 
+
+
+# Discussion
+
+
+To summarize what we have done, we first transformed all of our multilevel explanatory variables into binary variables which greatly simplifies our data. We then made a logistic regression model based on these variables and then used the census data to predict the proportion of voters who will vote for Trump. Essentially, we categorized each observation into broad groups and counted all of the observations that are in the same groups.\
+
+Based off the estimated proportion of voters in favour of voting for Donald Trump being 0.4182, we predict that Joe Biden will win the popularity vote. However, because our data has been overly simplified by making all categorical variables binary, we lose a lot of accuracy when using this transformed data. Although this method of using simplified data provides potentially inaccurate results, it serves as a good starting point for a more in-depth analysis of the model and gives a general idea of what we can expect the results to be like. Although 0.4182 is not the exact proportion of voters who will vote for Trump and as we start adding in the multilevel categories, transforming from binary back to original, we can expect that the result will be more accurate and will be somewhat close to 0.4182. This is one of the weakness of this model. Oversimplification. This model is separated into groups that are too general and people with different properties may be categorized into the same group, thus reducing accuracy. One way to work around this issue is to make new models where each categorical variable is not binary anymore, but includes more than 2 categories if not all. \
+
+Additionally, our model has a relatively small sample size. With a total of 6,116 observations, this value is far less than the total number of voters in the US. This further reduces the accuracy of the model. Unfortunately, a larger sample size was unavailable for use as it slowed down my computer way too much. However, a simple solution for this issue is to find more participants and get a larger sample size.
+
+
+## Next Steps
+
+As mentioned before, the next steps towards a more complete and accurate model is to first increase the sample size and much as possible. This will ensure the values calculated from the model will be more accurate. Additionally, we can use all of the categories for each explanatory variable instead of the simplified binary variables. 
+
+\newpage
+# References
+
+$$\bullet$$ Wickham et al., (2019). Welcome to the tidyverse. Journal of Open Source Software, 4(43), 1686, https://doi.org/10.21105/joss.01686
+
+$$\bullet$$ Hadley Wickham and Evan Miller (2020). haven: Import and Export 'SPSS', 'Stata' and 'SAS' Files. R package version 2.3.1.
+            https://CRAN.R-project.org/package=haven
+          
+$$\bullet$$ Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation. R package version 1.0.2.
+            https://CRAN.R-project.org/package=dplyr
+          
+$$\bullet$$ Douglas Bates, Martin Maechler, Ben Bolker, Steve Walker (2015). Fitting Linear Mixed-Effects Models Using lme4. Journal of Statistical
+            Software, 67(1), 1-48. doi:10.18637/jss.v067.i01.
+          
+$$\bullet$$ H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+
+$$\bullet$$ Hadley Wickham (2020). tidyr: Tidy Messy Data. R package version 1.1.2. https://CRAN.R-project.org/package=tidyr
+
+$$\bullet$$ David Robinson, Alex Hayes and Simon Couch (2020). broom: Convert Statistical Objects into Tidy Tibbles. R package version 0.7.1.
+            https://CRAN.R-project.org/package=broom
+
+$$\bullet$$ Alboukadel Kassambara (2020). ggpubr: 'ggplot2' Based Publication Ready Plots. R package version 0.4.0.
+            https://CRAN.R-project.org/package=ggpubr
+          
+$$\bullet$$ Yihui Xie (2020). knitr: A General-Purpose Package for Dynamic Report Generation in R. R package version 1.30.
+
+$$\bullet$$ Steven Ruggles, Sarah Flood, Ronald Goeken, Josiah Grover, Erin Meyer, Jose Pacas and Matthew Sobek. IPUMS USA: Version 10.0 [dataset].                     Minneapolis, MN: IPUMS, 2020. https://doi.org/10.18128/D010.V10.0
+
+$$\bullet$$ Tausanovitch, Chris and Lynn Vavreck. 2020. Democracy Fund + UCLA Nationscape, October 10-17, 2019 (version 20200814).
+
